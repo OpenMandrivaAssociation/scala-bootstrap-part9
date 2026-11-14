@@ -1,0 +1,571 @@
+diff -ruN old/compile.sh new/compile.sh
+--- old/compile.sh	2026-11-14 06:35:44.000000000 +0100
++++ new/compile.sh	2026-11-14 18:42:03.248993155 +0100
+@@ -30,6 +30,18 @@
+ fi
+ 
+ /bin/mkdir -p "$ROOT/vendor-src" "$ROOT/logs" "$ROOT/stages" "$ROOT/verify" "$ROOT/blockbin"
++
++if [[ -n ${SCALA_BOOT_SEED:-} ]]; then
++  test -d "$SCALA_BOOT_SEED/stages"
++  seed_next=$(tr -d '[:space:]' < "$SCALA_BOOT_SEED/next-stage")
++  test -n "${SCALA_BOOT_FROM:-}"
++  test "$seed_next" = "$SCALA_BOOT_FROM"
++  /bin/cp -a "$SCALA_BOOT_SEED/stages/." "$ROOT/stages/"
++  echo "seed_installed $seed_next"
++  if [[ ${SCALA_BOOT_SEED_CHECK:-} == only ]]; then
++    exit 0
++  fi
++fi
+ for src in "$ROOT"/vendor/*.src.zip; do
+   base=$(basename "$src" .src.zip)
+   /bin/cp -f "$src" "$ROOT/vendor-src/${base}.jar"
+@@ -107,6 +119,13 @@
+ set -o pipefail
+ bash "$ROOT/scripts/buildit.sh" 2>&1 | tee "$ROOT/logs/buildit.out"
+ 
++if [[ -n ${SCALA_BOOT_UNTIL:-} ]]; then
++  grep -q "^STOP_UNTIL ${SCALA_BOOT_UNTIL}$" "$ROOT/logs/buildit.out"
++  bash "$ROOT/scripts/pack-seed.sh"
++  echo "scala_bootstrap_part_dist ${SCALA_BOOT_UNTIL}"
++  exit 0
++fi
++
+ if [[ ${SCALA_BOOT_STOP:-} == first ]]; then
+   grep -q '^STOP_FIRST ' "$ROOT/logs/buildit.out"
+   grep -q '^OK ' "$VERIFY_LOG"
+diff -ruN old/scripts/buildit.sh new/scripts/buildit.sh
+--- old/scripts/buildit.sh	2026-11-14 11:24:07.000000000 +0100
++++ new/scripts/buildit.sh	2026-11-14 18:42:03.249763804 +0100
+@@ -642,6 +642,34 @@
+   exit 1
+ }
+ 
++index_ready() {
++  [[ "${#STAGE_ORDER[@]}" -gt 0 ]] || index_stages
++}
++
++# Stages before SCALA_BOOT_FROM are already published in a checkpoint RPM.
++# Returning 0 means the caller must not prune or compile this stage.
++resume_skip() {
++  local branch="$1"
++  local from_i
++  local branch_i
++
++  [[ -n "${SCALA_BOOT_FROM:-}" ]] || return 1
++  index_ready
++  [[ -n "${STAGE_INDEX[$SCALA_BOOT_FROM]:-}" ]] || fail "SCALA_BOOT_FROM is not a stage: $SCALA_BOOT_FROM"
++  from_i="${STAGE_INDEX[$SCALA_BOOT_FROM]}"
++  branch_i="${STAGE_INDEX[$branch]}"
++  [[ "$branch_i" -lt "$from_i" ]]
++}
++
++stop_until() {
++  local branch="$1"
++
++  [[ -n "${SCALA_BOOT_UNTIL:-}" ]] || return 1
++  index_ready
++  [[ -n "${STAGE_INDEX[$SCALA_BOOT_UNTIL]:-}" ]] || fail "SCALA_BOOT_UNTIL is not a stage: $SCALA_BOOT_UNTIL"
++  [[ "$branch" == "$SCALA_BOOT_UNTIL" ]]
++}
++
+ run() {
+   echo
+   echo ">>> $*"
+@@ -935,6 +963,12 @@
+     echo "stage=$branch $(date -u +%Y-%m-%dT%H:%M:%SZ)" > "${STATUS_FILE:?}"
+     echo "========== BUILD GROUP1: $branch =========="
+ 
++    if resume_skip "$branch"; then
++      echo ">>> resume skip $branch"
++      prev="$branch"
++      continue
++    fi
++
+     prune_before "$branch"
+     create_worktree "$branch"
+     pushd "$(stage_path "$branch")" >/dev/null
+@@ -962,6 +996,11 @@
+ 
+     mark_built "$branch"
+ 
++    if stop_until "$branch"; then
++      echo "STOP_UNTIL $branch"
++      exit 0
++    fi
++
+     if [[ "${SCALA_BOOT_STOP:-}" == first ]]; then
+       echo "STOP_FIRST $branch"
+       exit 0
+@@ -980,6 +1019,11 @@
+     echo "stage=$branch $(date -u +%Y-%m-%dT%H:%M:%SZ)" > "${STATUS_FILE:?}"
+     echo "========== BUILD GROUP2: $branch =========="
+ 
++    if resume_skip "$branch"; then
++      echo ">>> resume skip $branch"
++      continue
++    fi
++
+     prune_before "$branch"
+     create_worktree "$branch"
+     pushd "$(stage_path "$branch")" >/dev/null
+@@ -995,6 +1039,11 @@
+ 
+     mark_built "$branch"
+ 
++    if stop_until "$branch"; then
++      echo "STOP_UNTIL $branch"
++      exit 0
++    fi
++
+     popd >/dev/null
+   done
+ }
+@@ -1009,6 +1058,12 @@
+     echo "stage=$branch $(date -u +%Y-%m-%dT%H:%M:%SZ)" > "${STATUS_FILE:?}"
+     echo "========== BUILD GROUP3_MAKE: $branch =========="
+ 
++    if resume_skip "$branch"; then
++      echo ">>> resume skip $branch"
++      prev="$branch"
++      continue
++    fi
++
+     prune_before "$branch"
+     create_worktree "$branch"
+     pushd "$(stage_path "$branch")" >/dev/null
+@@ -1027,6 +1082,11 @@
+ 
+     mark_built "$branch"
+ 
++    if stop_until "$branch"; then
++      echo "STOP_UNTIL $branch"
++      exit 0
++    fi
++
+     popd >/dev/null
+     prev="$branch"
+   done
+@@ -1040,6 +1100,11 @@
+     echo "stage=$branch $(date -u +%Y-%m-%dT%H:%M:%SZ)" > "${STATUS_FILE:?}"
+     echo "========== BUILD GROUP3_ANT: $branch =========="
+ 
++    if resume_skip "$branch"; then
++      echo ">>> resume skip $branch"
++      continue
++    fi
++
+     prune_before "$branch"
+     create_worktree "$branch"
+     pushd "$(stage_path "$branch")" >/dev/null
+@@ -1058,6 +1123,11 @@
+ 
+     mark_built "$branch"
+ 
++    if stop_until "$branch"; then
++      echo "STOP_UNTIL $branch"
++      exit 0
++    fi
++
+     popd >/dev/null
+   done
+ }
+@@ -1078,6 +1148,12 @@
+     echo "stage=$branch $(date -u +%Y-%m-%dT%H:%M:%SZ)" > "${STATUS_FILE:?}"
+     echo "========== BUILD GROUP4: $branch =========="
+ 
++    if resume_skip "$branch"; then
++      echo ">>> resume skip $branch"
++      prev="$branch"
++      continue
++    fi
++
+     prune_before "$branch"
+     create_worktree "$branch"
+     pushd "$(stage_path "$branch")" >/dev/null
+@@ -1199,6 +1275,11 @@
+ 
+     mark_built "$branch"
+ 
++    if stop_until "$branch"; then
++      echo "STOP_UNTIL $branch"
++      exit 0
++    fi
++
+     popd >/dev/null
+     prev="$branch"
+   done
+@@ -1215,6 +1296,12 @@
+     echo "stage=$branch $(date -u +%Y-%m-%dT%H:%M:%SZ)" > "${STATUS_FILE:?}"
+     echo "========== BUILD GROUP5: $branch =========="
+ 
++    if resume_skip "$branch"; then
++      echo ">>> resume skip $branch"
++      prev="$branch"
++      continue
++    fi
++
+     prune_before "$branch"
+     create_worktree "$branch"
+     pushd "$(stage_path "$branch")" >/dev/null
+@@ -1235,6 +1322,11 @@
+ 
+     mark_built "$branch"
+ 
++    if stop_until "$branch"; then
++      echo "STOP_UNTIL $branch"
++      exit 0
++    fi
++
+     popd >/dev/null
+     prev="$branch"
+   done
+@@ -1604,4 +1696,6 @@
+   echo "All done."
+ }
+ 
+-main "$@"
++if [[ "${SCALA_BOOT_LIB:-}" != 1 ]]; then
++  main "$@"
++fi
+diff -ruN old/scripts/check-part.sh new/scripts/check-part.sh
+--- old/scripts/check-part.sh	1970-01-01 01:00:00.000000000 +0100
++++ new/scripts/check-part.sh	2026-11-14 18:42:03.250118759 +0100
+@@ -0,0 +1,107 @@
++#!/bin/bash
++# Compile and run Hello with the checkpoint scalac installed by this RPM.
++set -euo pipefail
++
++prefix=${1:?}
++# JDK 27 has no rt.jar. This scalac has to run on JDK 8 even when the
++# rpmbuild environment points JAVA_HOME at a newer JDK.
++if [[ -z ${JAVA_HOME:-} || ! -x ${JAVA_HOME}/bin/java ]] || ! "${JAVA_HOME}/bin/java" -version 2>&1 | grep -q '1\.8\.0'; then
++  JAVA_HOME=$(echo /usr/lib/jvm/java-1.8.0-openjdk-*)
++  JAVA_HOME=${JAVA_HOME%% *}
++fi
++export JAVA_HOME
++export PATH="$JAVA_HOME/bin:/usr/bin:/bin"
++
++stage=$(tr -d '[:space:]' < "$prefix/until-stage")
++base=$prefix/stages/$stage
++scalac=$base/build/pack/bin/scalac
++lib=$base/build/pack/lib/scala-library.jar
++rt=$JAVA_HOME/jre/lib/rt.jar
++[[ -x $scalac ]] || {
++  echo "missing scalac $scalac" >&2
++  exit 1
++}
++[[ -s $lib ]] || {
++  echo "missing library $lib" >&2
++  exit 1
++}
++[[ -s $rt ]] || {
++  echo "missing rt.jar $rt" >&2
++  exit 1
++}
++
++stub=""
++best=-1
++shopt -s nullglob
++for candidate in "$base"/build/java8-stubs-r*.jar; do
++  rev=${candidate##*-r}
++  rev=${rev%.jar}
++  case $rev in
++    ''|*[!0-9]*) continue ;;
++  esac
++  if [[ $best -lt 0 || $rev -gt $best ]]; then
++    best=$rev
++    stub=$candidate
++  fi
++done
++shopt -u nullglob
++if [[ -z $stub && -f $base/build/java8-stubs.jar ]]; then
++  stub=$base/build/java8-stubs.jar
++fi
++# Group 5 build-scala.sh writes three jars instead of java8-stubs.jar.
++if [[ -z $stub \
++  && -s $base/build/java8-charbuffer-overrides.jar \
++  && -s $base/build/java8-legacy-stubs.jar \
++  && -s $base/build/java8-filtered-stubs.jar ]]; then
++  stub="$base/build/java8-charbuffer-overrides.jar:$base/build/java8-legacy-stubs.jar:$base/build/java8-filtered-stubs.jar"
++fi
++if [[ -z $stub ]]; then
++  echo "missing java8 stubs under $base/build" >&2
++  exit 1
++fi
++case $stub in
++  *:*) ;;
++  *)
++    [[ -s $stub ]] || {
++      echo "missing java8 stubs under $base/build" >&2
++      exit 1
++    }
++    ;;
++esac
++
++work=$(mktemp -d)
++trap '/bin/rm -rf "$work"' EXIT
++cat > "$work/Hello.scala" << 'EOF'
++object Hello {
++  def main(args: Array[String]): Unit = {
++    Console.println("scala_bootstrap_part_ok " + (40 + 2))
++  }
++}
++EOF
++bcp_flag=$(tr -d '[:space:]' < "$prefix/bcp-flag")
++case $bcp_flag in
++  -bootclasspath|-javabootclasspath) ;;
++  *)
++    echo "bad bcp flag: $bcp_flag" >&2
++    exit 1
++    ;;
++esac
++scala_boot_lib=$(tr -d '[:space:]' < "$prefix/scala-boot-lib")
++case $scala_boot_lib in
++  0|1) ;;
++  *)
++    echo "bad scala-boot-lib: $scala_boot_lib" >&2
++    exit 1
++    ;;
++esac
++
++mkdir -p "$work/classes"
++args=("$bcp_flag" "$stub:$rt")
++if [[ $bcp_flag == -javabootclasspath && $scala_boot_lib == 1 ]]; then
++  args+=(-bootclasspath "$lib")
++fi
++"$scalac" "${args[@]}" -d "$work/classes" "$work/Hello.scala"
++test -s "$work/classes/Hello.class"
++"$JAVA_HOME/bin/java" -cp "$work/classes:$lib" Hello | tee "$work/run.log"
++grep -q 'scala_bootstrap_part_ok 42' "$work/run.log"
++echo "scala_bootstrap_part_ok 42"
+diff -ruN old/scripts/pack-seed.sh new/scripts/pack-seed.sh
+--- old/scripts/pack-seed.sh	1970-01-01 01:00:00.000000000 +0100
++++ new/scripts/pack-seed.sh	2026-11-14 18:38:58.766435242 +0100
+@@ -0,0 +1,226 @@
++#!/bin/bash
++# Copy the jars the next climb stage opens. The stage trees stay in the
++# build directory; the checkpoint RPM only needs these files.
++set -euo pipefail
++
++ROOT=$(cd "$(dirname "$0")/.." && pwd)
++cd "$ROOT"
++UNTIL=${SCALA_BOOT_UNTIL:?}
++
++export SCALA_BOOT_LIB=1
++export WORKTREE_ROOT
++WORKTREE_ROOT=$(cd "$ROOT/stages" && pwd -P)
++export REPO_DIR=$ROOT/repo
++export VERIFY_STAGE_SH=$ROOT/verify_stage.sh
++# shellcheck disable=SC1091
++source "$ROOT/scripts/buildit.sh"
++
++index_stages
++[[ -n ${STAGE_INDEX[$UNTIL]:-} ]] || fail "SCALA_BOOT_UNTIL is not a stage: $UNTIL"
++until_i=${STAGE_INDEX[$UNTIL]}
++next_i=$((until_i + 1))
++[[ "$next_i" -lt ${#STAGE_ORDER[@]} ]] || fail "UNTIL is the last stage"
++next=${STAGE_ORDER[$next_i]}
++
++prev=way2scala-2.0-stage10-bootstrap
++pred=""
++seed_kind=""
++for branch in "${GROUP4[@]}"; do
++  effective=${GROUP4_PREV[$branch]:-$prev}
++  if [[ $branch == "$next" ]]; then
++    pred=$effective
++    seed_kind=group4
++    break
++  fi
++  prev=$branch
++done
++if [[ -z $pred ]]; then
++  prev=v2.9.3-bootstrap
++  for branch in "${GROUP5[@]}"; do
++    effective=${GROUP5_PREV[$branch]:-$prev}
++    if [[ $branch == "$next" ]]; then
++      pred=$effective
++      seed_kind=group5
++      break
++    fi
++    prev=$branch
++  done
++fi
++[[ -n $pred ]] || fail "next stage is not in group 4 or group 5: $next"
++[[ $pred == "$UNTIL" ]] || fail "predecessor $pred is not the checkpoint stage $UNTIL"
++
++dest=$ROOT/dist/seed
++/bin/rm -rf "$dest"
++/bin/mkdir -p "$dest/stages"
++
++copy_path() {
++  local abs=$1
++  local rel
++  local parent
++
++  case "$abs" in
++    "$WORKTREE_ROOT"/*) rel=${abs#"$WORKTREE_ROOT"/} ;;
++    *) fail "path is outside the stage root: $abs" ;;
++  esac
++  [[ -e $abs ]] || fail "missing seed file: $abs"
++  parent=$(dirname "$rel")
++  /bin/mkdir -p "$dest/stages/$parent"
++  /bin/cp -a "$abs" "$dest/stages/$rel"
++}
++
++
++copy_group5_stage() {
++  local name=$1
++  local dir
++  local stub
++
++  dir=$(stage_path "$name")
++  copy_path "$(absolute_path "$dir/build/pack/lib/scala-library.jar")"
++  copy_path "$(absolute_path "$dir/build/pack/lib/scala-compiler.jar")"
++  if [[ -s $dir/build/pack/lib/scala-reflect.jar ]]; then
++    copy_path "$(absolute_path "$dir/build/pack/lib/scala-reflect.jar")"
++  fi
++  if [[ -f $dir/build/pack/bin/scalac ]]; then
++    copy_path "$(absolute_path "$dir/build/pack/bin/scalac")"
++    chmod +x "$dest/stages/$name/build/pack/bin/scalac"
++  fi
++  shopt -s nullglob
++  for stub in "$dir"/build/java8-stubs*.jar; do
++    copy_path "$(absolute_path "$stub")"
++  done
++  shopt -u nullglob
++  for stub in java8-charbuffer-overrides.jar java8-legacy-stubs.jar java8-filtered-stubs.jar; do
++    if [[ -s $dir/build/$stub ]]; then
++      copy_path "$(absolute_path "$dir/build/$stub")"
++    fi
++  done
++}
++
++copy_later_predecessors() {
++  local ui=${STAGE_INDEX[$UNTIL]}
++  local branch
++  local bi
++  local dep
++  local di
++  local prev=v2.9.3-bootstrap
++  local effective
++  local deps
++  local ver
++  local -A g5deps=()
++  local -A seen=()
++
++  for branch in "${GROUP5[@]}"; do
++    effective=${GROUP5_PREV[$branch]:-$prev}
++    deps=$effective
++    ver=${GROUP5_VERSION[$branch]:-$branch}
++    if [[ -n ${FORKJOIN_NEEDED[$ver]:-} ]]; then
++      deps+=" v2.10.0-M3+8ce4787-bootstrap"
++    fi
++    g5deps["$branch"]=$deps
++    prev=$branch
++  done
++  for branch in "${GROUP5[@]}"; do
++    bi=${STAGE_INDEX[$branch]}
++    if [[ "$bi" -le "$ui" ]]; then
++      continue
++    fi
++    for dep in ${g5deps[$branch]}; do
++      di=${STAGE_INDEX[$dep]}
++      if [[ "$di" -lt "$ui" ]]; then
++        seen["$dep"]=1
++      fi
++    done
++  done
++  if [[ ${#seen[@]} -eq 0 ]]; then
++    return 0
++  fi
++  while IFS= read -r dep; do
++    copy_group5_stage "$dep"
++    echo "kept_pred $dep"
++  done < <(printf '%s\n' "${!seen[@]}" | sort)
++}
++
++stage_dir=$(stage_path "$pred")
++if [[ $seed_kind == group4 ]]; then
++  copy_path "$(group4_starr_lib "$pred")"
++  copy_path "$(group4_starr_comp "$pred")"
++  if ! group4_uses_source_fjbg "$next"; then
++    copy_path "$(group4_fjbg_jar)"
++  fi
++  bridge=${GROUP4_BRIDGE_PREV[$next]:-}
++  if [[ -n $bridge ]]; then
++    copy_path "$(group4_starr_lib "$bridge")"
++    copy_path "$(group4_starr_comp "$bridge")"
++  fi
++  jprev=${GROUP4_JAVABOOTCLASSPATH_PREV[$next]:-}
++  if [[ -n $jprev ]]; then
++    copy_path "$(absolute_path "$(stage_path "$jprev")/build/java8-stubs.jar")"
++  fi
++else
++  # build-scala.sh reads these pack jars from the previous stage directory.
++  # group4_starr_lib maps v2.10* onto build/quick/lib, which these stages do not write.
++  load_forkjoin_needed
++  copy_group5_stage "$pred"
++  if [[ -n ${FORKJOIN_NEEDED[$next]:-} ]]; then
++    forkjoin_jar=$stage_dir/build/libs/forkjoin.jar
++    if [[ ! -s $forkjoin_jar ]]; then
++      forkjoin_jar=$(stage_path v2.10.0-M3+8ce4787-bootstrap)/build/libs/forkjoin.jar
++    fi
++    copy_path "$(absolute_path "$forkjoin_jar")"
++  fi
++  # A later stage can name a predecessor this checkpoint does not replace.
++  copy_later_predecessors
++fi
++if [[ $seed_kind == group4 ]]; then
++  if [[ -f $stage_dir/build/pack/bin/scalac ]]; then
++    copy_path "$(absolute_path "$stage_dir/build/pack/bin/scalac")"
++    chmod +x "$dest/stages/$pred/build/pack/bin/scalac"
++  fi
++  shopt -s nullglob
++  for stub in "$stage_dir"/build/java8-stubs*.jar; do
++    copy_path "$(absolute_path "$stub")"
++  done
++  shopt -u nullglob
++  for stub in java8-charbuffer-overrides.jar java8-legacy-stubs.jar java8-filtered-stubs.jar; do
++    if [[ -s $stage_dir/build/$stub ]]; then
++      copy_path "$(absolute_path "$stage_dir/build/$stub")"
++    fi
++  done
++fi
++
++# The installed seed has no sources. Record the bootclasspath flag
++# verify_stage would have chosen from this stage's sources.
++[[ -d $stage_dir/src ]] || fail "checkpoint stage has no sources: $stage_dir"
++bcp_flag=-bootclasspath
++if grep -R -q -F 'case "javabootclasspath"' "$stage_dir/src" --include='*.scala'; then
++  bcp_flag=-javabootclasspath
++fi
++scala_boot_lib=0
++if [[ $bcp_flag == -javabootclasspath ]] && grep -R -q -F 'def scalaBootClassPath  = ""' "$stage_dir/src" --include='PathResolver.scala'; then
++  scala_boot_lib=1
++fi
++printf '%s\n' "$bcp_flag" > "$dest/bcp-flag"
++printf '%s\n' "$scala_boot_lib" > "$dest/scala-boot-lib"
++
++printf '%s\n' "$UNTIL" > "$dest/until-stage"
++printf '%s\n' "$next" > "$dest/next-stage"
++printf '%s\n' "$pred" > "$dest/pred-stage"
++test -s "$dest/stages/$pred/build/pack/lib/scala-library.jar"
++test -s "$dest/stages/$pred/build/pack/lib/scala-compiler.jar"
++# The next stage compiles FJBG from its own sources. The stage10 jar is
++# not a seed file in that case, and the copy above already skipped it.
++# Group 5 does not read the stage10 jar at all.
++if [[ $seed_kind == group4 ]] && ! group4_uses_source_fjbg "$next"; then
++  test -s "$dest/stages/way2scala-2.0-stage10-bootstrap/distribs/unix/scala-2.0-stage10-bootstrap/share/scala/lib/fjbg.jar"
++fi
++if [[ $seed_kind == group5 && -n ${FORKJOIN_NEEDED[$next]:-} ]]; then
++  forkjoin_copied=0
++  if [[ -s $dest/stages/$pred/build/libs/forkjoin.jar ]]; then
++    forkjoin_copied=1
++  fi
++  if [[ -s $dest/stages/v2.10.0-M3+8ce4787-bootstrap/build/libs/forkjoin.jar ]]; then
++    forkjoin_copied=1
++  fi
++  [[ $forkjoin_copied == 1 ]] || fail "forkjoin jar was not copied for $next"
++fi
++echo "seed_ok until=$UNTIL next=$next pred=$pred"
