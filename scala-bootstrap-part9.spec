@@ -11,6 +11,7 @@ Patch0:		scala-bootstrap-part9-stop.patch
 BuildArch:	noarch
 BuildRequires:	scala-bootstrap-part8 = 1
 BuildRequires:	java-1.8.0-openjdk-devel
+BuildRequires:	clang
 BuildRequires:	git-core
 BuildRequires:	make
 BuildRequires:	python
@@ -37,6 +38,7 @@ test -s scripts/pack-seed.sh
 test -s scripts/check-part.sh
 test -s scripts/buildit.sh
 grep -q resume_skip scripts/buildit.sh
+grep -q rebuild_host_natives scripts/buildit.sh
 grep -q SCALA_BOOT_UNTIL compile.sh
 grep -q SCALA_BOOT_SEED compile.sh
 grep -q bcp-flag scripts/pack-seed.sh

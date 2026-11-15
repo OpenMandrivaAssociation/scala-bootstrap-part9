@@ -1,6 +1,6 @@
 diff -ruN old/compile.sh new/compile.sh
---- old/compile.sh	2026-11-14 06:35:44.000000000 +0100
-+++ new/compile.sh	2026-11-14 18:42:03.248993155 +0100
+--- old/compile.sh	2026-11-15 15:41:22.982177544 +0100
++++ new/compile.sh	2026-11-15 15:41:23.342701128 +0100
 @@ -30,6 +30,18 @@
  fi
  
@@ -35,8 +35,8 @@ diff -ruN old/compile.sh new/compile.sh
    grep -q '^STOP_FIRST ' "$ROOT/logs/buildit.out"
    grep -q '^OK ' "$VERIFY_LOG"
 diff -ruN old/scripts/buildit.sh new/scripts/buildit.sh
---- old/scripts/buildit.sh	2026-11-14 11:24:07.000000000 +0100
-+++ new/scripts/buildit.sh	2026-11-14 18:42:03.249763804 +0100
+--- old/scripts/buildit.sh	2026-11-15 15:41:23.341045608 +0100
++++ new/scripts/buildit.sh	2026-11-15 15:41:23.343357536 +0100
 @@ -642,6 +642,34 @@
    exit 1
  }
@@ -72,7 +72,31 @@ diff -ruN old/scripts/buildit.sh new/scripts/buildit.sh
  run() {
    echo
    echo ">>> $*"
-@@ -935,6 +963,12 @@
+@@ -890,6 +918,23 @@
+   echo ">>> Writing success marker: $MARKER"
+ }
+ 
++# The committed libnatives-64.so is an x86-64 blob. Partest loads it on
++# 64-bit hosts, so rebuild it from natives.c for the builder's architecture.
++rebuild_host_natives() {
++  local jvm="$1"
++  local inc
++
++  [[ -f "$jvm/natives.c" && -f "$jvm/libnatives-64.so" ]] || return 0
++  inc="${JAVA_HOME:?}/include"
++  [[ -f "$inc/jni.h" ]] || fail "jni.h is missing under $inc"
++  [[ -d "$inc/linux" ]] || fail "jni linux headers are missing under $inc"
++  (
++    cd "$jvm"
++    cc -shared -fPIC -I"$inc" -I"$inc/linux" -o libnatives-64.so natives.c
++  )
++  echo "host_natives_ok $(uname -m) $jvm/libnatives-64.so"
++}
++
+ create_worktree() {
+   local branch="$1"
+   local remote_ref="refs/remotes/$REMOTE/$branch"
+@@ -935,6 +980,12 @@
      echo "stage=$branch $(date -u +%Y-%m-%dT%H:%M:%SZ)" > "${STATUS_FILE:?}"
      echo "========== BUILD GROUP1: $branch =========="
  
@@ -85,7 +109,7 @@ diff -ruN old/scripts/buildit.sh new/scripts/buildit.sh
      prune_before "$branch"
      create_worktree "$branch"
      pushd "$(stage_path "$branch")" >/dev/null
-@@ -962,6 +996,11 @@
+@@ -962,6 +1013,11 @@
  
      mark_built "$branch"
  
@@ -97,7 +121,7 @@ diff -ruN old/scripts/buildit.sh new/scripts/buildit.sh
      if [[ "${SCALA_BOOT_STOP:-}" == first ]]; then
        echo "STOP_FIRST $branch"
        exit 0
-@@ -980,6 +1019,11 @@
+@@ -980,6 +1036,11 @@
      echo "stage=$branch $(date -u +%Y-%m-%dT%H:%M:%SZ)" > "${STATUS_FILE:?}"
      echo "========== BUILD GROUP2: $branch =========="
  
@@ -109,7 +133,7 @@ diff -ruN old/scripts/buildit.sh new/scripts/buildit.sh
      prune_before "$branch"
      create_worktree "$branch"
      pushd "$(stage_path "$branch")" >/dev/null
-@@ -995,6 +1039,11 @@
+@@ -995,6 +1056,11 @@
  
      mark_built "$branch"
  
@@ -121,7 +145,7 @@ diff -ruN old/scripts/buildit.sh new/scripts/buildit.sh
      popd >/dev/null
    done
  }
-@@ -1009,6 +1058,12 @@
+@@ -1009,6 +1075,12 @@
      echo "stage=$branch $(date -u +%Y-%m-%dT%H:%M:%SZ)" > "${STATUS_FILE:?}"
      echo "========== BUILD GROUP3_MAKE: $branch =========="
  
@@ -134,7 +158,7 @@ diff -ruN old/scripts/buildit.sh new/scripts/buildit.sh
      prune_before "$branch"
      create_worktree "$branch"
      pushd "$(stage_path "$branch")" >/dev/null
-@@ -1027,6 +1082,11 @@
+@@ -1027,6 +1099,11 @@
  
      mark_built "$branch"
  
@@ -146,7 +170,7 @@ diff -ruN old/scripts/buildit.sh new/scripts/buildit.sh
      popd >/dev/null
      prev="$branch"
    done
-@@ -1040,6 +1100,11 @@
+@@ -1040,6 +1117,11 @@
      echo "stage=$branch $(date -u +%Y-%m-%dT%H:%M:%SZ)" > "${STATUS_FILE:?}"
      echo "========== BUILD GROUP3_ANT: $branch =========="
  
@@ -158,7 +182,7 @@ diff -ruN old/scripts/buildit.sh new/scripts/buildit.sh
      prune_before "$branch"
      create_worktree "$branch"
      pushd "$(stage_path "$branch")" >/dev/null
-@@ -1058,6 +1123,11 @@
+@@ -1058,6 +1140,11 @@
  
      mark_built "$branch"
  
@@ -170,7 +194,7 @@ diff -ruN old/scripts/buildit.sh new/scripts/buildit.sh
      popd >/dev/null
    done
  }
-@@ -1078,6 +1148,12 @@
+@@ -1078,6 +1165,12 @@
      echo "stage=$branch $(date -u +%Y-%m-%dT%H:%M:%SZ)" > "${STATUS_FILE:?}"
      echo "========== BUILD GROUP4: $branch =========="
  
@@ -183,7 +207,7 @@ diff -ruN old/scripts/buildit.sh new/scripts/buildit.sh
      prune_before "$branch"
      create_worktree "$branch"
      pushd "$(stage_path "$branch")" >/dev/null
-@@ -1199,6 +1275,11 @@
+@@ -1199,6 +1292,11 @@
  
      mark_built "$branch"
  
@@ -195,7 +219,7 @@ diff -ruN old/scripts/buildit.sh new/scripts/buildit.sh
      popd >/dev/null
      prev="$branch"
    done
-@@ -1215,6 +1296,12 @@
+@@ -1215,6 +1313,12 @@
      echo "stage=$branch $(date -u +%Y-%m-%dT%H:%M:%SZ)" > "${STATUS_FILE:?}"
      echo "========== BUILD GROUP5: $branch =========="
  
@@ -208,7 +232,16 @@ diff -ruN old/scripts/buildit.sh new/scripts/buildit.sh
      prune_before "$branch"
      create_worktree "$branch"
      pushd "$(stage_path "$branch")" >/dev/null
-@@ -1235,6 +1322,11 @@
+@@ -1225,6 +1329,8 @@
+       continue
+     fi
+ 
++    rebuild_host_natives "test/files/jvm"
++
+     effective_prev="${GROUP5_PREV[$branch]:-$prev}"
+     if [[ "$effective_prev" != "$prev" ]]; then
+       echo ">>> Using explicit predecessor: $branch <- $effective_prev"
+@@ -1235,6 +1341,11 @@
  
      mark_built "$branch"
  
@@ -220,7 +253,7 @@ diff -ruN old/scripts/buildit.sh new/scripts/buildit.sh
      popd >/dev/null
      prev="$branch"
    done
-@@ -1604,4 +1696,6 @@
+@@ -1604,4 +1715,6 @@
    echo "All done."
  }
  
@@ -230,7 +263,7 @@ diff -ruN old/scripts/buildit.sh new/scripts/buildit.sh
 +fi
 diff -ruN old/scripts/check-part.sh new/scripts/check-part.sh
 --- old/scripts/check-part.sh	1970-01-01 01:00:00.000000000 +0100
-+++ new/scripts/check-part.sh	2026-11-14 18:42:03.250118759 +0100
++++ new/scripts/check-part.sh	2026-11-15 15:41:23.342949511 +0100
 @@ -0,0 +1,107 @@
 +#!/bin/bash
 +# Compile and run Hello with the checkpoint scalac installed by this RPM.
@@ -341,7 +374,7 @@ diff -ruN old/scripts/check-part.sh new/scripts/check-part.sh
 +echo "scala_bootstrap_part_ok 42"
 diff -ruN old/scripts/pack-seed.sh new/scripts/pack-seed.sh
 --- old/scripts/pack-seed.sh	1970-01-01 01:00:00.000000000 +0100
-+++ new/scripts/pack-seed.sh	2026-11-14 18:38:58.766435242 +0100
++++ new/scripts/pack-seed.sh	2026-11-15 15:41:23.343040932 +0100
 @@ -0,0 +1,226 @@
 +#!/bin/bash
 +# Copy the jars the next climb stage opens. The stage trees stay in the
