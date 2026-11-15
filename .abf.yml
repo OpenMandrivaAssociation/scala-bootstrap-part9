@@ -1,3 +1,5 @@
 sources:
   scala-bootstrap-2.10.7.tar.gz: 174a883ed7460cf12f54467561ecfd8a413a895b
+  scala-bootstrap-part9-stop.patch: f2ec2a3115e0253b847927d6c1127b0f4e986132
+removed_sources:
   scala-bootstrap-part9-stop.patch: 6c2460138c30014e0d4636e0d787aaf01ae0f71d
