@@ -1,7 +1,7 @@
 Name:		scala-bootstrap-part9
 Version:	1
 Release:	1
-Summary:	Ninth checkpoint of the Scala 2.10.7 bootstrap climb
+Summary:	Second half of the ninth Scala 2.10.7 bootstrap checkpoint
 Group:		Development/Java
 License:	Apache-2.0
 URL:		https://github.com/vxtls/scala
@@ -9,7 +9,7 @@ Source0:	scala-bootstrap-2.10.7.tar.gz
 Patch0:		scala-bootstrap-part9-stop.patch
 
 BuildArch:	noarch
-BuildRequires:	scala-bootstrap-part8 = 1
+BuildRequires:	scala-bootstrap-part9a = 1
 BuildRequires:	java-1.8.0-openjdk-devel
 BuildRequires:	clang
 BuildRequires:	git-core
@@ -20,8 +20,8 @@ BuildRequires:	patch
 
 %description
 Checkpoint of the vxtls Scala bootstrap climb from
-v2.10.0-RC1+220ea07 through v2.10.6.
-It resumes from the scala-bootstrap-part8 seed.
+v2.10.1 through v2.10.6.
+It resumes from the scala-bootstrap-part9a seed.
 v2.10.7 is the last stage and stays for the final resume.
 This package does not provide the Scala 2.10.7 compiler.
 
@@ -50,8 +50,8 @@ test "$(grep -c group4_uses_source_fjbg scripts/pack-seed.sh)" = 2
 set -eo pipefail
 export JAVA_HOME=$(ls -d %{_jvmdir}/java-1.8.0-openjdk-* | head -n 1)
 export PATH="$JAVA_HOME/bin:/usr/bin:/bin"
-export SCALA_BOOT_SEED=%{_datadir}/scala-bootstrap-part8/seed
-export SCALA_BOOT_FROM=v2.10.0-RC1+220ea07-bootstrap
+export SCALA_BOOT_SEED=%{_datadir}/scala-bootstrap-part9a/seed
+export SCALA_BOOT_FROM=v2.10.1-bootstrap
 export SCALA_BOOT_UNTIL=v2.10.6-bootstrap
 bash ./compile.sh
 
